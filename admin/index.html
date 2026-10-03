@@ -67,9 +67,24 @@ body{min-height:100vh;background:linear-gradient(160deg,#e8f0f8 0%,#f0f5fa 50%,#
 .stats-row{display:flex;gap:10px;margin-bottom:16px;flex-wrap:wrap}
 .stat-pill{background:#fff;border-radius:20px;padding:6px 16px;font-size:13px;color:#555;box-shadow:0 2px 8px rgba(0,0,0,0.05)}
 .stat-pill b{color:#2c6ba8}
+
+/* Win11 加载环 */
+.boot-overlay{position:fixed;inset:0;background:#0f4b8a;z-index:9999;display:none;flex-direction:column;align-items:center;justify-content:center;transition:opacity 1.2s ease;opacity:1}
+.boot-overlay.fade{opacity:0;pointer-events:none}
+.boot-spinner{width:56px;height:56px;position:relative;margin-bottom:28px}
+.boot-spinner::before,.boot-spinner::after{content:"";position:absolute;inset:0;border-radius:50%;border:3px solid transparent}
+.boot-spinner::before{border-top-color:#fff;border-right-color:#fff;animation:spin 0.9s linear infinite}
+.boot-spinner::after{border-bottom-color:#fff;border-left-color:rgba(255,255,255,0.3);animation:spin 0.9s linear infinite reverse}
+@keyframes spin{to{transform:rotate(360deg)}}
+.boot-msg{color:#fff;font-size:15px;letter-spacing:1px;text-align:center;padding:0 32px;min-height:24px}
 </style>
 </head>
 <body>
+
+<div class="boot-overlay" id="bootOverlay">
+  <div class="boot-spinner"></div>
+  <div class="boot-msg" id="bootMsg"></div>
+</div>
 
 <div id="loginView">
   <div class="login-page">
@@ -116,6 +131,12 @@ body{min-height:100vh;background:linear-gradient(160deg,#e8f0f8 0%,#f0f5fa 50%,#
     <p><span data-i18n="totalPrefix">共</span> <span id="count">0</span> <span data-i18n="totalSuffix">个文件，删除后不可恢复</span></p>
   </div>
   <div class="stats-row" id="statsRow"></div>
+  <div id="adminDrop" style="border:2px dashed #444;padding:24px;text-align:center;margin:16px 0;border-radius:8px;cursor:pointer;background:#fff">
+    <p style="font-size:14px;color:#555;margin-bottom:10px">拖拽文件到此处上传，或点击选择文件</p>
+    <div style="padding:8px 16px;border:1px solid #888;background:#f7f7f7;border-radius:4px;cursor:pointer;font-size:14px;display:inline-block">选择文件</div>
+    <div id="adminUploadStatus" style="font-size:13px;color:#888;margin-top:8px"></div>
+  </div>
+  <input type="file" id="adminFile" style="display:none" accept=".ust,.ustx,.vsq,.vsqx,.vpr,.pp2,.pp3,.zip,.rar">
   <input type="text" class="search-box" id="searchBox" data-i18n-ph="searchPh" placeholder="搜索文件名...">
   <div class="file-list" id="fileList">
     <div class="empty" data-i18n="loading">加载中...</div>
@@ -179,12 +200,52 @@ function doLogin() {
   const u = document.getElementById("username").value.trim();
   const p = document.getElementById("password").value.trim();
   const err = document.getElementById("loginErr");
-  if (!u || !p) { err.style.display = "block"; return; }
-  if (u !== ADMIN_USER || p !== ADMIN_PASS) { err.style.display = "block"; return; }
   err.style.display = "none";
-  adminPwd = p;
-  sessionStorage.setItem("utau_admin_pwd", p);
-  showAdmin();
+
+  const isCorrect = (["admin","宋昱衡","1"].includes(u) && p === ADMIN_PASS);
+
+  // 加载文字多语言
+  const bootMsgs = {
+    zh: ["正在检验账户信息...","正在核验系统...","正在初始化...","正在开启服务器...","正在维护主站/副站生态...","服务器接入，准备进入系统...","服务器已启动"],
+    ja: ["アカウント情報を確認中...","システムを検証中...","初期化中...","サーバーを起動中...","メイン/サブサイトを維持中...","サーバー接続、システム準備中...","サーバー起動完了"],
+    en: ["Verifying account info...","Checking system...","Initializing...","Starting server...","Maintaining main/backup sites...","Server connected, preparing...","Server started"]
+  };
+  const msgs = bootMsgs[lang] || bootMsgs.zh;
+
+  const overlay = document.getElementById("bootOverlay");
+  const msg = document.getElementById("bootMsg");
+  overlay.style.display = "flex";
+  overlay.classList.remove("fade");
+
+  if (!isCorrect) {
+    // 密码错误：1.5秒后退出
+    msg.textContent = msgs[0];
+    setTimeout(() => {
+      msg.textContent = lang === "zh" ? "认证失败" : lang === "ja" ? "認証失敗" : "Authentication failed";
+      setTimeout(() => {
+        overlay.classList.add("fade");
+        setTimeout(() => { overlay.style.display = "none"; }, 1200);
+        err.style.display = "block";
+      }, 800);
+    }, 1500);
+    return;
+  }
+
+  // 密码正确：完整10秒启动序列
+  const steps = [[0,0],[1500,1],[3000,2],[4500,3],[6000,4],[7500,5],[9000,6]];
+  steps.forEach(([delay, idx]) => {
+    setTimeout(() => { msg.textContent = msgs[idx]; }, delay);
+  });
+
+  setTimeout(() => {
+    overlay.classList.add("fade");
+    setTimeout(() => {
+      overlay.style.display = "none";
+      adminPwd = p;
+      sessionStorage.setItem("utau_admin_pwd", p);
+      showAdmin();
+    }, 1200);
+  }, 10000);
 }
 
 function showAdmin() {
@@ -275,6 +336,48 @@ document.getElementById("searchBox").addEventListener("input", (e) => {
   const filtered = q ? allFiles.filter(f => f.name.toLowerCase().includes(q)) : allFiles;
   renderList(filtered);
 });
+
+const adminDrop = document.getElementById("adminDrop");
+const adminFile = document.getElementById("adminFile");
+adminDrop.onclick = () => adminFile.click();
+adminDrop.ondragover = (e) => { e.preventDefault(); adminDrop.style.background = "#eef"; };
+adminDrop.ondragleave = () => { adminDrop.style.background = "#fff"; };
+adminDrop.ondrop = (e) => {
+  e.preventDefault(); adminDrop.style.background = "#fff";
+  if (e.dataTransfer.files.length > 0) { adminFile.files = e.dataTransfer.files; adminUpload(); }
+};
+adminFile.onchange = () => { if (adminFile.files.length > 0) adminUpload(); };
+
+async function adminUpload() {
+  const input = document.getElementById("adminFile");
+  const status = document.getElementById("adminUploadStatus");
+  const f = input.files[0];
+  if (!f) { status.textContent = "请先选择文件"; return; }
+  const ext = f.name.split(".").pop().toLowerCase();
+  if (!["ust","ustx","vsq","vsqx","vpr","pp2","pp3","zip","rar"].includes(ext)) {
+    status.textContent = "文件类型不允许"; return;
+  }
+  status.textContent = "上传中...";
+  const buf = await f.arrayBuffer();
+  const b64 = btoa(String.fromCharCode(...new Uint8Array(buf)));
+  try {
+    const res = await fetch(API, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ filename: f.name, data: b64 })
+    });
+    const data = await res.json();
+    if (data.ok) {
+      status.textContent = "上传成功";
+      input.value = "";
+      loadFiles();
+    } else {
+      status.textContent = "上传失败：" + (data.msg || "");
+    }
+  } catch (e) {
+    status.textContent = "网络错误：" + e.message;
+  }
+}
 
 async function doDelete(filename, rowEl) {
   const t = I18N[lang];
